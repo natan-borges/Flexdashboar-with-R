@@ -1,0 +1,235 @@
+---
+title: "Teste Prático"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(shiny)
+library(readxl)
+library(tidyr)
+library(dplyr)
+library(data.table)
+library(ggplot2)
+library(plotly)
+library(rstatix)
+
+# Importando os dados
+
+tabela <- read_excel("2020_Statistical_Annex_Table_4.xlsx")
+
+
+# Removendo as colunas vazias
+
+tabela<- tabela %>% select(-4,-6,-8,-10,-12,-14,-16,-18,-20,-22,-24,-26)
+
+#renomear colunas
+
+nome_col<-names(tabela)
+
+novos_nomes<-c(paste(tabela[5,1]),
+               paste(tabela[5,2]),
+               paste(tabela[5,3],"_",tabela[3,3]),
+               paste(tabela[5,4],"_",tabela[3,3]),
+               paste(tabela[5,5],"_",tabela[3,5]),
+               paste(tabela[5,6],"_",tabela[3,5]),
+               paste(tabela[5,7],"_",tabela[3,7]),
+               paste(tabela[5,8],"_",tabela[3,7]),
+               paste(tabela[5,9],"_",tabela[3,9]),
+               paste(tabela[5,10],"_",tabela[3,9]),
+               paste(tabela[5,11],"_",tabela[3,11]),
+               paste(tabela[5,12],"_",tabela[3,11]),
+               paste(tabela[5,13],"_",tabela[3,13]),
+               paste(tabela[5,14],"_",tabela[3,13])
+               )
+
+tabela %>% setnames(old= nome_col,new=novos_nomes)
+
+# Removando dados desnecessários  
+
+
+tabela<-tabela%>% filter(!is.na(tabela[,1]))
+
+tabela<- tabela[-1,]
+
+tabela <- tabela %>% select(-1,-2,-3,-4)
+
+# Ajustando os dados para analise 
+
+tabela<-tabela %>%
+  pivot_longer(everything(),
+               names_to = c("Gender", ".value"),
+               names_pattern = "(.+)_(.+)"
+  )
+
+
+# Ajustando as classes das variaveis
+tabela[,c(2:6)]<-apply(tabela[, c(2:6)], 2, as.numeric)
+names(tabela)
+
+## inserindo variable dummy no sexo
+tabela <-tabela %>%
+  mutate(Gender1 = ifelse( Gender == "Male ", 1, 0))
+
+
+
+matrizcor<- tabela %>% select(3:6) %>% na.omit() %>% cor_mat() %>% data.frame()
+
+
+
+```
+
+# Índice de desenvolvimento humano por gêneros
+
+
+
+Row  
+-------------------------------------
+
+### Box plot do Índice de desenvolvimento humano por gêneros
+
+```{r}
+#Row {.tabset .tabset-fade}
+comp_IDH_box<-tabela %>% ggplot(aes(x= Gender,y= ` Human Development Index`)) +
+   geom_boxplot(alpha = 0.6, color="black", fill =  "khaki") +  theme(axis.text.x  = element_text( size = rel(1)))
+ggplotly(comp_IDH_box)
+
+```
+
+
+
+### Curva de densidade do Índice de desenvolvimento humano por gêneros
+
+```{r}
+medias<-   tabela %>% group_by(Gender)%>% na.omit() %>%summarise(media=mean(` Human Development Index`)) 
+comp_IDH_dens<- tabela %>% ggplot(aes(x=` Human Development Index`,color=Gender))+ 
+  geom_density() + geom_vline(data=medias, aes(xintercept= media, color=Gender), linetype="dashed")+scale_color_brewer(palette="Dark2")+ylab("densidade")
+ggplotly(comp_IDH_dens)
+
+```
+
+
+## Row  {data-height=150} 
+-------------------------------------
+
+### Inferência - Teste de Mann Whitney
+
+```{r}
+
+#teste de mann whitney pq os dados não são normais, e as distribuições são parecidas... Testando se as medianas são iguais
+wilcox.test(` Human Development Index` ~ Gender ,data=tabela)
+
+```
+
+# Fatores associados com o Indice de desenvolvimento humano por gêneros
+
+## Column{.sidebar}
+
+--------------------------------------------------------------
+
+```{r input}
+ selectInput( 
+   inputId = "fator",
+   label = "Escolha um fator", 
+   choices =  names(tabela)[3:6])
+```
+
+
+
+
+Row 
+-------------------------------------
+
+
+### Box plot
+
+```{r}
+renderPlotly({
+  
+  
+  life_box<-tabela %>% ggplot(aes(x= Gender,y= !!sym(input$fator))) +
+geom_boxplot(alpha = 0.6, color="black", fill = "steelblue") +  theme(axis.text.x  = element_text( size = rel(1)))
+ggplotly(life_box)
+
+  
+})
+  
+
+
+```
+
+
+
+### Gráfico de dispersão
+
+```{r}
+renderPlotly({ 
+
+life_plot<-tabela  %>% ggplot( aes(!!sym(input$fator), ` Human Development Index`, colour = Gender)) +   geom_point()
+
+ggplotly(life_plot)
+
+})
+
+```
+
+Row 
+-------------------------------------
+
+### Regressão Linear
+
+```{r}
+
+model <- reactive({
+  
+   if(!!sym(input$fator) == names(tabela[,6])){
+   var <- tabela %>% mutate(ln = log(!!sym(input$fator)))
+   var <- var %>% select(` Human Development Index`,Gender1,ln)
+        
+  
+     lm(` Human Development Index` ~ ., data = var)
+  }else{
+  
+  
+
+  var <- tabela %>% select(` Human Development Index`,Gender1,!!sym(input$fator))
+  
+  lm(` Human Development Index` ~ . , data = var)
+ }
+  
+})
+
+
+```
+
+
+```{r}
+renderPrint({ 
+   
+summary(model())
+
+})
+
+
+
+```
+
+### Análise Residual
+
+```{r}
+
+renderPlotly({
+  
+  ggplot(NULL) +  aes(x = fitted(model()), y = residuals(model())) +  geom_point()+ ylim(c(-0.3,0.3))+    stat_smooth() + xlab("IDH") + ylab("Residuos")
+
+})
+
+```
+
+
+
+
